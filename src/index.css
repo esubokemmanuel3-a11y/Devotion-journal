@@ -1,0 +1,116 @@
+@import url('https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,400;0,500;0,600;1,400;1,500&family=IBM+Plex+Sans:wght@400;500;600&display=swap');
+@import "tailwindcss";
+
+/*
+  Two named themes, same tokens:
+
+  "Sunlit Page" (default, light) — warm cream paper, brass ink.
+  "Study Lamp" (dark) — a desk lamp pooling warm light in a dark room.
+
+  Toggle by setting data-theme="light" | "dark" on :root (App.jsx does
+  this from the saved preference). Token NAMES stay the same across
+  themes so every component just reads var(--brass), var(--parchment),
+  etc. without knowing which theme is active.
+
+  Serif (Spectral)     — devotional text, reflections: the "page"
+  Sans (IBM Plex Sans) — UI chrome, labels, buttons: the "room"
+*/
+
+:root,
+:root[data-theme='light'] {
+  --navy-deep: #faf6ee;
+  --navy-panel: #f3ecdd;
+  --navy-panel-raised: #ece2cd;
+  --navy-line: #ddd0b3;
+
+  --brass: #9c6f34;
+  --brass-bright: #7a5525;
+  --brass-dim: #c2a06a;
+  --brass-rgb: 156, 111, 52;
+
+  --chrome: #6b5f4a;
+  --chrome-dim: #b0a488;
+
+  --parchment: #2c2416;
+  --parchment-dim: #6b5f4a;
+
+  --lamp-glow-strong: rgba(var(--brass-rgb), 0.1);
+  --lamp-glow-soft: rgba(var(--brass-rgb), 0.04);
+
+  --font-serif: 'Spectral', Georgia, serif;
+  --font-sans: 'IBM Plex Sans', system-ui, sans-serif;
+}
+
+:root[data-theme='dark'] {
+  --navy-deep: #15161c;
+  --navy-panel: #1c1d24;
+  --navy-panel-raised: #22232b;
+  --navy-line: #2b2c34;
+
+  --brass: #c99a53;
+  --brass-bright: #e6b768;
+  --brass-dim: #6b5530;
+  --brass-rgb: 201, 154, 83;
+
+  --chrome: #8b8578;
+  --chrome-dim: #5e5a4f;
+
+  --parchment: #ece4d3;
+  --parchment-dim: #9a927e;
+
+  --lamp-glow-strong: rgba(var(--brass-rgb), 0.16);
+  --lamp-glow-soft: rgba(var(--brass-rgb), 0.06);
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  background: var(--navy-deep);
+  color: var(--parchment);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.lamp-glow {
+  position: relative;
+}
+
+.lamp-glow::before {
+  content: '';
+  position: absolute;
+  top: -20%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 140%;
+  height: 220px;
+  background: radial-gradient(
+    ellipse at center,
+    var(--lamp-glow-strong) 0%,
+    var(--lamp-glow-soft) 40%,
+    transparent 70%
+  );
+  pointer-events: none;
+  z-index: 0;
+  animation: lamp-breathe 5s ease-in-out infinite;
+}
+
+@keyframes lamp-breathe {
+  0%, 100% { opacity: 0.75; transform: translateX(-50%) scale(1); }
+  50% { opacity: 1; transform: translateX(-50%) scale(1.06); }
+}
+
+:focus-visible {
+  outline: 2px solid var(--brass);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
