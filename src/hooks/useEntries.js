@@ -1,21 +1,20 @@
 import { useCallback, useEffect, useState } from 'react';
+import { supabase } from '../lib/supabaseClient';
 
-const STORAGE_KEY = 'daily-light-journal:entries';
-
-function loadEntries() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
+function fromRow(row) {
+  return {
+    id: row.id,
+    year: row.year,
+    month: row.month,
+    day: row.day,
+    slot: row.slot,
+    text: row.text,
+    tags: row.tags ?? [],
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
 }
 
-function persistEntries(entries) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
-}
-
-/** One reflection per year+month+day+slot. */
 function matchesSlot(entry, year, month, day, slot) {
   return (
     entry.year === year &&
@@ -26,13 +25,44 @@ function matchesSlot(entry, year, month, day, slot) {
 }
 
 export function useEntries() {
-  const [entries, setEntries] = useState(loadEntries);
+  const [entries, setEntries] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const loadEntries = useCallback(async () => {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      setEntries([]);
+      setLoading(false);
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from('entries')
+      .select('*')
+      .order('year', { ascending: false })
+      .order('month', { ascending: false })
+      .order('day', { ascending: false });
+
+    if (error) {
+      console.error('Failed to load entries:', error.message);
+      setEntries([]);
+    } else {
+      setEntries(data.map(fromRow));
+    }
+    setLoading(false);
+  }, []);
 
   useEffect(() => {
-    persistEntries(entries);
-  }, [entries]);
+    loadEntries();
+    const { data: listener } = supabase.auth.onAuthStateChange(() => {
+      loadEntries();
+    });
+    return () => listener.subscription.unsubscribe();
+  }, [loadEntries]);
 
-  /** Returns the saved reflection for this exact date+slot, or null. */
   const getEntry = useCallback(
     (year, month, day, slot) =>
       entries.find((e) => matchesSlot(e, year, month, day, slot)) ?? null,
@@ -40,33 +70,41 @@ export function useEntries() {
   );
 
   /** Creates or updates the single reflection for a date+slot. */
-  const saveEntry = useCallback((year, month, day, slot, { text, tags }) => {
+  const saveEntry = useCallback(async (year, month, day, slot, { text, tags }) => {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return;
+
+    const { data, error } = await supabase
+      .from('entries')
+      .upsert(
+        { user_id: user.id, year, month, day, slot, text, tags, updated_at: new Date().toISOString() },
+        { onConflict: 'user_id,year,month,day,slot' }
+      )
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Failed to save entry:', error.message);
+      return;
+    }
+
     setEntries((prev) => {
       const existing = prev.find((e) => matchesSlot(e, year, month, day, slot));
-      const now = new Date().toISOString();
-
-      if (existing) {
-        return prev.map((e) =>
-          e.id === existing.id ? { ...e, text, tags, updatedAt: now } : e
-        );
-      }
-
-      const newEntry = {
-        id: crypto.randomUUID(),
-        year,
-        month,
-        day,
-        slot,
-        text,
-        tags,
-        createdAt: now,
-        updatedAt: now,
-      };
-      return [...prev, newEntry];
+      const saved = fromRow(data);
+      return existing
+        ? prev.map((e) => (e.id === existing.id ? saved : e))
+        : [...prev, saved];
     });
   }, []);
 
-  const deleteEntry = useCallback((id) => {
+  const deleteEntry = useCallback(async (id) => {
+    const { error } = await supabase.from('entries').delete().eq('id', id);
+    if (error) {
+      console.error('Failed to delete entry:', error.message);
+      return;
+    }
     setEntries((prev) => prev.filter((e) => e.id !== id));
   }, []);
 
@@ -78,7 +116,6 @@ export function useEntries() {
     return a.slot === b.slot ? 0 : a.slot === 'evening' ? -1 : 1;
   });
 
-  /** Case-insensitive keyword match against text, plus optional tag filter. */
   const searchEntries = useCallback(
     (keyword, tag) => {
       const kw = keyword.trim().toLowerCase();
@@ -91,12 +128,12 @@ export function useEntries() {
     [timeline]
   );
 
-  /** All distinct tags in use, for the filter picker. */
   const allTags = [...new Set(entries.flatMap((e) => e.tags))].sort();
 
   return {
     entries,
     timeline,
+    loading,
     getEntry,
     saveEntry,
     deleteEntry,

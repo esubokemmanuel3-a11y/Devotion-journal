@@ -1,58 +1,125 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { supabase } from '../lib/supabaseClient';
 
-const PROFILE_KEY = 'daily-light-journal:profile';
-const SESSION_KEY = 'daily-light-journal:session';
 const DEFAULT_AVATAR_ID = 'lamp';
 
-function loadProfile() {
-  try {
-    const raw = localStorage.getItem(PROFILE_KEY);
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
-}
-
-function loadSession() {
-  return localStorage.getItem(SESSION_KEY) === 'true';
-}
-
 /**
- * Mock auth — this is a UI-only stand-in for real authentication.
- * Signing up saves a local profile; logging in just checks a profile
- * exists (no real password check). Wire this up to a real backend later.
+ * Real auth via Supabase. Signup creates the auth user + a matching row in
+ * `profiles`. Login/logout use Supabase sessions directly, and a listener
+ * keeps `isAuthed` in sync with the actual session (including on refresh).
  */
 export function useProfile() {
-  const [profile, setProfile] = useState(loadProfile);
-  const [isAuthed, setIsAuthed] = useState(loadSession);
+  const [profile, setProfile] = useState(null);
+  const [isAuthed, setIsAuthed] = useState(false);
+  const [loading, setLoading] = useState(true);
 
-  const signUp = useCallback(({ username, email }) => {
-    const newProfile = { username, email, avatarId: DEFAULT_AVATAR_ID };
-    localStorage.setItem(PROFILE_KEY, JSON.stringify(newProfile));
-    localStorage.setItem(SESSION_KEY, 'true');
-    setProfile(newProfile);
-    setIsAuthed(true);
+  const fetchProfile = useCallback(async (userId) => {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', userId)
+      .single();
+
+    if (error) {
+      console.error('Failed to load profile:', error.message);
+      return null;
+    }
+    return data;
   }, []);
 
-  const logIn = useCallback(() => {
-    // UI-only: any submitted credentials "succeed" if a local profile exists.
-    localStorage.setItem(SESSION_KEY, 'true');
+  useEffect(() => {
+    let isMounted = true;
+
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (!isMounted) return;
+      if (session?.user) {
+        const p = await fetchProfile(session.user.id);
+        if (isMounted) {
+          setProfile(p);
+          setIsAuthed(true);
+        }
+      }
+      if (isMounted) setLoading(false);
+    });
+
+    const { data: listener } = supabase.auth.onAuthStateChange(
+      async (_event, session) => {
+        if (session?.user) {
+          const p = await fetchProfile(session.user.id);
+          setProfile(p);
+          setIsAuthed(true);
+        } else {
+          setProfile(null);
+          setIsAuthed(false);
+        }
+      }
+    );
+
+    return () => {
+      isMounted = false;
+      listener.subscription.unsubscribe();
+    };
+  }, [fetchProfile]);
+
+  const signUp = useCallback(async ({ username, email, password }) => {
+    const { data, error } = await supabase.auth.signUp({ email, password });
+    if (error) throw new Error(error.message);
+
+    const userId = data.user?.id;
+    if (!userId) {
+      // Email confirmation is likely required before a session exists.
+      throw new Error(
+        'Check your email to confirm your account before signing in.'
+      );
+    }
+
+    const { error: profileError } = await supabase.from('profiles').insert({
+      id: userId,
+      username,
+      avatar_id: DEFAULT_AVATAR_ID,
+    });
+    if (profileError) throw new Error(profileError.message);
+
+    const p = await fetchProfile(userId);
+    setProfile(p);
     setIsAuthed(true);
+  }, [fetchProfile]);
+
+  const logIn = useCallback(async ({ email, password }) => {
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) throw new Error(error.message);
+    // onAuthStateChange picks up the resulting session and sets profile/isAuthed.
   }, []);
 
-  const logOut = useCallback(() => {
-    localStorage.setItem(SESSION_KEY, 'false');
-    setIsAuthed(false);
+  const logOut = useCallback(async () => {
+    await supabase.auth.signOut();
   }, []);
 
   const updateAvatar = useCallback(
-    (avatarId) => {
-      const next = { ...profile, avatarId };
-      localStorage.setItem(PROFILE_KEY, JSON.stringify(next));
-      setProfile(next);
+    async (avatarId) => {
+      if (!profile) return;
+      const { error } = await supabase
+        .from('profiles')
+        .update({ avatar_id: avatarId })
+        .eq('id', profile.id);
+      if (error) {
+        console.error('Failed to update avatar:', error.message);
+        return;
+      }
+      setProfile({ ...profile, avatar_id: avatarId });
     },
     [profile]
   );
 
-  return { profile, isAuthed, signUp, logIn, logOut, updateAvatar };
+  return {
+    profile: profile
+      ? { username: profile.username, email: profile.email, avatarId: profile.avatar_id }
+      : null,
+    isAuthed,
+    loading,
+    signUp,
+    logIn,
+    logOut,
+    updateAvatar,
+  };
 }

@@ -13,7 +13,7 @@ import { ProfileScreen } from './screens/ProfileScreen';
 
 export default function App() {
   const entriesApi = useEntries();
-  const { profile, isAuthed, signUp, logIn, logOut, updateAvatar } = useProfile();
+  const { profile, isAuthed, loading: authLoading, signUp, logIn, logOut, updateAvatar } = useProfile();
   const { textSize, setTextSize, theme, setTheme, scaleOf } = usePreferences();
   const textScale = scaleOf(textSize);
 
@@ -22,9 +22,10 @@ export default function App() {
   }, [theme]);
 
   // Pre-auth: 'login' | 'signup'. Post-auth: 'today' | 'timeline' | 'search' | 'profile' | 'detail'.
-  const [screen, setScreen] = useState(profile ? 'login' : 'signup');
+  const [screen, setScreen] = useState('login');
   const [activeEntryId, setActiveEntryId] = useState(null);
   const [cameFrom, setCameFrom] = useState('today');
+  const [authError, setAuthError] = useState('');
 
   function navigate(next) {
     setScreen(next);
@@ -41,14 +42,24 @@ export default function App() {
     setActiveEntryId(null);
   }
 
-  function handleSignUp(details) {
-    signUp(details);
-    setScreen('today');
+  async function handleSignUp(details) {
+    setAuthError('');
+    try {
+      await signUp(details);
+      setScreen('today');
+    } catch (err) {
+      setAuthError(err.message);
+    }
   }
 
-  function handleLogIn() {
-    logIn();
-    setScreen('today');
+  async function handleLogIn(details) {
+    setAuthError('');
+    try {
+      await logIn(details);
+      setScreen('today');
+    } catch (err) {
+      setAuthError(err.message);
+    }
   }
 
   function handleLogOut() {
@@ -59,15 +70,19 @@ export default function App() {
   const shell = (
     <div className="flex min-h-dvh flex-col overflow-x-hidden" style={{ backgroundColor: 'var(--navy-deep)' }}>
       <main className="flex flex-1 items-center justify-center">
-        {!isAuthed && screen === 'login' && (
+        {authLoading && (
+          <p style={{ color: 'var(--parchment-dim)', fontFamily: 'var(--font-sans)' }}>Loading…</p>
+        )}
+        {!authLoading && !isAuthed && screen === 'login' && (
           <LoginScreen
             onLogIn={handleLogIn}
             onGoToSignup={() => setScreen('signup')}
             hasProfile={!!profile}
+            error={authError}
           />
         )}
-        {!isAuthed && screen === 'signup' && (
-          <SignupScreen onSignUp={handleSignUp} onGoToLogin={() => setScreen('login')} />
+        {!authLoading && !isAuthed && screen === 'signup' && (
+          <SignupScreen onSignUp={handleSignUp} onGoToLogin={() => setScreen('login')} error={authError} />
         )}
 
         {isAuthed && screen === 'today' && <TodayScreen entriesApi={entriesApi} textScale={textScale} />}
